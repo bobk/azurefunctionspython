@@ -31,7 +31,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         req_body = req.get_json()
         server = req_body.get('server')
         project = req_body.get('project')
-        assignee = req.params.get('assignee')
+        assignee = req_body.get('assignee')
         username = req_body.get('username')
         userpassword = req_body.get('userpassword')
 
