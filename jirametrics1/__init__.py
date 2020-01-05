@@ -11,10 +11,12 @@
 
 import logging
 import azure.functions as func
-
+from http import HTTPStatus
 from jira import JIRA
 
+#   Input bindings are passed in via parameters to main()
 def main(req: func.HttpRequest) -> func.HttpResponse:
+#   Write to the Azure Functions log stream.
     logging.info("starting processing")
 
 #   we need these 5 variables to calculate metrics - note that no user credentials are stored or cached anywhere
@@ -41,19 +43,33 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
         try:
             logging.info("opening Jira connection")
-            jiraoptions = {"server": "http://" + server}
+            jiraoptions = {"server": "http://" + server, "max_retries": 0}
 #   username = Atlassian Cloud Jira Server user ID email address, userpassword = an API token generated under that user ID
-            jiraconn = JIRA(jiraoptions, basic_auth=(username, userpassword))
-            logging.info("running Jira query")
-            issues = jiraconn.search_issues(f"project in ({project}) and assignee in ({assignee}) and statusCategory in (\"In Progress\") order by createdDate desc", startAt=0, maxResults=0)
+            try:
+                jiraconn = JIRA(jiraoptions, basic_auth=(username, userpassword))
+#   were we able to connect?
+                logging.info("successful connection")
+                logging.info("running query")
+                issues = jiraconn.search_issues(f"project in ({project}) and assignee in ({assignee}) and statusCategory in (\"In Progress\")", startAt=0, maxResults=0)
+                status = HTTPStatus.OK
+                statusstr = "successful query: number of In Progress issues for {assignee} = " + str(len(issues))
+#   always attempt to close the connection regardless
+                logging.info(statusstr)
+                logging.info("closing Jira connection")
+                jiraconn.close()
+            except JIRAError:
+#   if not, adjust the HTTP status code and string appropriately
+                status = HTTPStatus.FORBIDDEN
+                statusstr = "unsuccessful connection (username/userpassword variables invalid?): no data"
+#   in case something unexpected happens
         except:
+            status = HTTPStatus.INTERNAL_SERVER_ERROR
             statusstr = "exception occurred during connection or query: no data"
-        else:
-            statusstr = "successful connection and query: num open issues = " + str(len(issues))
 
-        logging.info(statusstr)
-        logging.info("closing Jira connection")
-        jiraconn.close()
-        return func.HttpResponse(statusstr, status_code=200)
     else:
-        return func.HttpResponse("error retrieving variables: please pass the variables as either GET or POST", status_code=400)
+        status = HTTPStatus.BAD_REQUEST
+        statusstr = "error retrieving variables: please pass the variables as either GET or POST"
+
+    logging.info("ending processing")
+    #   create HTTP response
+    return func.HttpResponse(status_code=status, body=statusstr)
